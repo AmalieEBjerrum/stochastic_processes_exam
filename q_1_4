@@ -1,0 +1,123 @@
+import numpy as np
+import pandas as pd
+
+from math import comb
+
+from math import comb
+
+def compute_p_down(N_t, p, r, q):
+    """
+    Computes the probability of moving down one state (net loss of 1 patient).
+    Parameters:
+        N_t (int): Current number of patients.
+        p (float): Probability of a single patient leaving.
+        r (int): Shape parameter for Negative Binomial arrivals.
+        q (float): Success probability for Negative Binomial arrivals.
+    Returns:
+        float: Probability of moving down one state.
+    """
+    p_down = 0.0
+    for x in range(1, N_t + 1):  # Patients leaving: X_t = 1, 2, ...
+        P_X = comb(N_t, x) * (p**x) * (1 - p)**(N_t - x)  # Binomial PMF
+        P_Y = comb(x - 1 + r, x - 1) * (1 - q)**r * q**(x - 1)  # NegBin PMF for Y_t = x - 1
+        p_down += P_X * P_Y
+    return p_down
+
+
+def construct_dynamic_transition_matrix(cap, p, r, q):
+    """
+    Constructs a transition matrix where probabilities depend dynamically on N_t.
+    Parameters:
+        cap (int): Maximum number of patients (absorbing state).
+        p (float): Probability of a single patient leaving.
+        r (int): Shape parameter for Negative Binomial arrivals.
+        q (float): Success probability for Negative Binomial arrivals.
+    Returns:
+        np.ndarray: Transition matrix P.
+    """
+    size = cap + 1  # Number of states (0 to cap)
+    P = np.zeros((size, size))
+
+    # Absorbing states
+    P[0, 0] = 1  # State 0 is absorbing
+    P[cap, cap] = 1  # State cap is absorbing
+
+    # Transient states
+    for i in range(1, cap):
+        # Probabilities for X_t (patients leaving)
+        P_X_0 = (1 - p)**i       # P(X_t = 0)
+        P_X_1 = i * p * (1 - p)**(i - 1)  # P(X_t = 1)
+
+        # Probabilities for Y_t (patients arriving)
+        P_Y_1 = comb(1 + r - 1, 1) * (1 - q)**r * q**1  # P(Y_t = 1)
+        P_Y_2 = comb(2 + r - 1, 2) * (1 - q)**r * q**2  # P(Y_t = 2)
+
+        # Probabilities of moving up, down, and staying
+        p_up = P_X_0 * P_Y_1 + P_X_1 * P_Y_2
+        p_down = compute_p_down(i, p, r, q)
+        p_stay = max(0, 1 - p_down - p_up)
+
+        # Fill the transition matrix
+        P[i, i - 1] = p_down  # Move down
+        P[i, i] = p_stay      # Stay in the same state
+        P[i, i + 1] = p_up    # Move up
+
+    return P
+
+def print_transition_matrix_with_labels(P):
+    """
+    Prints the full transition matrix with state labels for rows and columns.
+    Parameters:
+        P (np.ndarray): Transition matrix.
+    Returns:
+        None
+    """
+    size = P.shape[0]
+    labels = [f"State {i}" for i in range(size)]
+    df = pd.DataFrame(P, index=labels, columns=labels)
+    print("Transition Matrix:")
+    print(df)
+
+def absorption_probability(P, start_state, max_steps):
+    """
+    Computes the probability that absorption takes more than max_steps.
+    Parameters:
+        P (np.ndarray): Transition matrix.
+        start_state (int): Initial state.
+        max_steps (int): Maximum number of steps.
+    Returns:
+        float: Probability of taking more than max_steps to absorb.
+    """
+    size = P.shape[0]
+    transient_states = size - 2  # Exclude two absorbing states (0 and cap)
+    Q = P[1:-1, 1:-1]  # Submatrix for transient states
+
+    # Initial probability distribution (start at start_state)
+    pi_0 = np.zeros(transient_states)
+    pi_0[start_state - 1] = 1  # Adjust index for 0-based Python
+
+    # Probability of being in transient states after max_steps
+    pi_t = pi_0 @ np.linalg.matrix_power(Q, max_steps)
+
+    # Total probability of still being in transient states
+    return np.sum(pi_t)
+
+# Parameters
+p = 0.1          # Probability of a single patient leaving
+r = 2            # Shape parameter for Negative Binomial arrivals
+q = 0.4          # Success probability for Negative Binomial arrivals
+cap = 10         # Maximum state (absorbing)
+start_state = 5  # Starting state
+max_steps = 24   # Maximum allowed steps
+
+# Construct dynamic transition matrix
+P = construct_dynamic_transition_matrix(cap, p, r, q)
+
+# Print the full transition matrix
+print_transition_matrix_with_labels(P)
+
+# Compute the probability of absorption taking more than 24 steps
+prob_more_than_24 = absorption_probability(P, start_state, max_steps)
+
+# Print result
+print(f"Probability that it takes more than 24 months to reach absorption: {prob_more_than_24:.4f}")
