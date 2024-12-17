@@ -1,0 +1,75 @@
+import numpy as np
+
+def construct_dynamic_transition_matrix(cap, p, r, q):
+    """
+    Constructs a transition matrix where probabilities depend dynamically on N_t.
+    Parameters:
+        cap (int): Maximum number of patients (absorbing state).
+        p (float): Probability of a single patient leaving.
+        r (int): Shape parameter for Negative Binomial arrivals.
+        q (float): Success probability for Negative Binomial arrivals.
+    Returns:
+        np.ndarray: Transition matrix P.
+    """
+    size = cap + 1  # Number of states (0 to cap)
+    P = np.zeros((size, size))
+
+    # Absorbing states
+    P[0, 0] = 1  # State 0 is absorbing
+    P[cap, cap] = 1  # State cap is absorbing
+
+    # Transient states
+    for i in range(1, cap):
+        # Probability of leaving (Binomial expectation)
+        p_down = min(i * p, 1.0)
+        
+        # Probability of staying
+        p_up = r * (q / (1 - q)) / cap  # Normalize arrivals to avoid exceeding bounds
+        p_stay = max(0, 1 - p_down - p_up)
+
+        # Fill the transition matrix
+        P[i, i - 1] = p_down  # Move down
+        P[i, i] = p_stay      # Stay in the same state
+        P[i, i + 1] = p_up    # Move up
+
+    return P
+
+def compute_absorption_probabilities(P, cap):
+    """
+    Computes the probability of reaching the cap state before reaching state 0.
+    Parameters:
+        P (np.ndarray): Transition matrix.
+        cap (int): Absorbing state at the upper limit.
+    Returns:
+        np.ndarray: Vector of probabilities of reaching the cap state from each state.
+    """
+    transient_states = cap - 1  # Exclude absorbing states (0 and cap)
+    Q = P[1:-1, 1:-1]  # Transient submatrix
+
+    # Identity matrix for solving (I - Q)
+    I = np.eye(Q.shape[0])
+    
+    # Vector of ones to account for absorption at state cap
+    b_cap = np.zeros(Q.shape[0])
+    b_cap[-1] = 1  # Absorption at cap state (boundary condition)
+
+    # Solve the system of linear equations (I - Q) * b = b_cap
+    b = np.linalg.solve(I - Q, b_cap)
+    
+    return b
+
+# Parameters
+p = 0.1          # Probability of a single patient leaving
+r = 2            # Shape parameter for Negative Binomial arrivals
+q = 0.4          # Success probability for Negative Binomial arrivals
+cap = 10         # Maximum state (absorbing)
+start_state = 5  # Starting state
+
+# Construct dynamic transition matrix
+P = construct_dynamic_transition_matrix(cap, p, r, q)
+
+# Compute absorption probabilities
+absorption_probs = compute_absorption_probabilities(P, cap)
+
+# Print the absorption probability for the starting state
+print(f"Probability of reaching cap from State {start_state}: {absorption_probs[start_state - 1]:.4f}")
