@@ -1,0 +1,117 @@
+import numpy as np
+from scipy.stats import nbinom, binom
+
+# Parameters
+p = 1 / 10  # Probability of leaving
+q = 2 / 5   # Negative binomial probability parameter
+r = 2       # Shape parameter for negative binomial
+N_max = 10  # Cap on the number of patients
+t_max = 24  # Time horizon
+
+# State space: 0 to N_max (11 states total)
+num_states = N_max + 1
+
+# Initialize the transition matrix
+P = np.zeros((num_states, num_states))
+
+# Build transition probabilities with arrivals and departures combined
+for i in range(1, N_max):  # For non-absorbing states (index 1 to N_max-1)
+    for j in range(num_states):  # Possible states (0 to N_max)
+        net_change = j - i  # Net change in patients
+        prob = 0
+
+        # Sum over all combinations of arrivals and departures
+        for arrivals in range(20):  # Limit the sum for computational feasibility
+            for departures in range(i):  # Departures are bounded by current state
+                if arrivals - departures == net_change:
+                    prob += nbinom.pmf(arrivals, r, q) * binom.pmf(departures, i - 1, p)
+
+        # Assign transition probability
+        P[i, j] = prob
+
+    # Normalize the row to ensure probabilities sum to 1 (after all entries for row i are computed)
+    row_sum = P[i, :].sum()
+    if row_sum > 0:  # Avoid division by zero
+        P[i, :] /= row_sum
+
+# Set absorbing states
+P[0, :] = 0
+P[0, 0] = 1  # State 0 is absorbing
+P[N_max, :] = 0
+P[N_max, N_max] = 1  # State N_max is absorbing
+
+# Initial state: Start at 5 patients
+pi = np.zeros(num_states)
+pi[5] = 1  # State 5 corresponds to index 5
+
+# Compute the state distribution after 24 months
+P_t = np.dot(pi, np.linalg.matrix_power(P, t_max))
+
+# Probability of not yet being absorbed (sum of states 1 to N_max-1)
+non_absorbing_states = range(1, N_max)
+P_not_absorbed = np.sum(P_t[non_absorbing_states])
+
+# Display result
+print(f'Probability that the system has not reached an absorbing state after {t_max} months: {P_not_absorbed:.4f}')
+print("Transition probabilities to state 0 (P[:, 0]):")
+print(P[:, 0])
+
+num_states = P.shape[0]
+
+# Initialize the vector for probabilities of hitting state 10 before 0
+u = np.zeros(num_states)
+
+# Boundary conditions
+u[0] = 1  # If we start at state 0, we can't reach state 10 first
+u[N_max] = 0  # If we start at state 10, we already reached it
+
+# Construct Q
+Q = P[1:N_max, 1:N_max]  # Transient-to-transient submatrix
+print("Matrix Q (transient-to-transient transition probabilities):")
+print(Q)
+
+# Construct A = I - Q
+I = np.eye(N_max - 1)
+A = I - Q
+
+# Construct b as a matrix in R^(9x2)
+b = np.zeros((N_max - 1, 2))
+b[:, 0] = P[1:N_max, 0]     # Column 0: direct transitions to state 0
+b[:, 1] = P[1:N_max, N_max] # Column 1: direct transitions to state 10
+print("Matrix b (direct transition probabilities to absorbing states):")
+print(b)
+
+# Solve for absorption probabilities
+u_0 = np.linalg.solve(A, b[:, 0])  # Absorption probabilities for state 0
+u_10 = np.linalg.solve(A, b[:, 1]) # Absorption probabilities for state 10
+
+# Display results
+print("Absorption probabilities for state 0:")
+print(u_0)
+
+print("Absorption probabilities for state 10:")
+print(u_10)
+
+# Verify that probabilities sum to 1
+print("Sum of probabilities (should be 1):")
+print(u_0 + u_10)
+
+# --------------------------
+# Compute Time-Limited Absorption Probabilities
+# --------------------------
+
+# Extract R: Transition probabilities from transient states to absorbing states
+R = P[1:N_max, [0, N_max]]
+
+# Initialize cumulative probability of absorption at state N_max (state 10)
+absorption_prob_time_limited = 0
+
+# Loop through time steps to compute cumulative absorption probability
+pi_k = pi.copy()
+for k in range(1, t_max + 1):
+    # Update the distribution after k steps
+    pi_k = np.dot(pi_k, P)
+    # Add the contribution of absorption into state N_max (state 10)
+    absorption_prob_time_limited += np.sum(pi_k[1:N_max] * R[:, 1])
+
+print(f"Probability of reaching state 10 before {t_max} months: {absorption_prob_time_limited:.4f}")
